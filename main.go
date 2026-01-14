@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"os"
 	"sync/atomic"
 	"time"
 
@@ -12,7 +13,12 @@ import (
 )
 
 var allowedOrigins = map[string]struct{}{
-	"http://localhost:8080": {},
+	"http://localhost:8080":  {},
+	"https://pong.tanav.me":  {},
+	"http://pong.tanav.me":   {},
+	"https://localhost:8080": {},
+	"http://127.0.0.1:8080":  {},
+	"https://127.0.0.1:8080": {},
 }
 
 var wsUpgrader = websocket.Upgrader{
@@ -173,15 +179,27 @@ func handleIndex(w http.ResponseWriter, r *http.Request) {
 	http.ServeFile(w, r, "./web/index.html")
 }
 
+func handleHealthz(w http.ResponseWriter, r *http.Request) {
+	w.WriteHeader(http.StatusOK)
+	_, _ = w.Write([]byte("ok"))
+}
+
 func main() {
 	go runLoop(globalHub)
 
 	http.HandleFunc("/", handleIndex)
+	http.HandleFunc("/healthz", handleHealthz)
 	http.Handle("/static/", http.StripPrefix("/static/", http.FileServer(http.Dir("./web/static"))))
 	http.HandleFunc("/ws", handleWS)
 
-	log.Println("Pong server running on http://localhost:8080")
-	if err := http.ListenAndServe(":8080", nil); err != nil {
+	port := "8080"
+	if p := os.Getenv("PORT"); p != "" {
+		port = p
+	}
+
+	addr := ":" + port
+	log.Printf("Pong server listening on %s", addr)
+	if err := http.ListenAndServe(addr, nil); err != nil {
 		log.Fatal(err)
 	}
 }
