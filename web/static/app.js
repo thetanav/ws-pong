@@ -18,7 +18,7 @@
   function sideName(side) {
     if (side === 0) return 'Left (W/S)'
     if (side === 1) return 'Right (↑/↓)'
-    return 'Waiting for opponent…'
+    return 'Spectating/Waiting…'
   }
 
   function wsURL() {
@@ -33,11 +33,26 @@
     ws.send(JSON.stringify({ type, data }))
   }
 
+  function getParams() {
+    const p = new URLSearchParams(location.search)
+    return {
+      roomId: p.get('room') || '',
+      name: p.get('name') || '',
+    }
+  }
+
   function connect() {
     ws = new WebSocket(wsURL())
 
     ws.onopen = () => {
-      statusEl.textContent = 'Connected. Pairing…'
+      const { roomId, name } = getParams()
+      if (roomId) {
+        statusEl.textContent = 'Connected. Joining room…'
+        send('join', { roomId, name })
+      } else {
+        if (name) send('name', { name })
+        statusEl.textContent = 'Connected. Pairing…'
+      }
     }
 
     ws.onclose = () => {
@@ -71,6 +86,10 @@
       if (msg.type === 'state') {
         state.game = msg.data
       }
+
+      if (msg.type === 'error') {
+        statusEl.textContent = `Error: ${msg.data}`
+      }
     }
   }
 
@@ -80,28 +99,36 @@
     return Math.max(0, Math.min(canvas.height, y))
   }
 
-  // Mouse/touch controls: always send mouse target.
-  canvas.addEventListener('mousemove', (e) => {
-    send('mouse', { y: canvasToWorldY(e.clientY) })
+  // Mouse/touch drag controls: only send while dragging.
+  let dragging = false
+
+  function sendDragY(clientY) {
+    if (!dragging) return
+    send('mouse', { y: canvasToWorldY(clientY) })
+  }
+
+  canvas.addEventListener('pointerdown', (e) => {
+    dragging = true
+    canvas.setPointerCapture(e.pointerId)
+    sendDragY(e.clientY)
   })
 
-  canvas.addEventListener(
-    'touchstart',
-    (e) => {
-      const t = e.touches[0]
-      if (t) send('mouse', { y: canvasToWorldY(t.clientY) })
-    },
-    { passive: true },
-  )
+  canvas.addEventListener('pointermove', (e) => {
+    sendDragY(e.clientY)
+  })
 
-  canvas.addEventListener(
-    'touchmove',
-    (e) => {
-      const t = e.touches[0]
-      if (t) send('mouse', { y: canvasToWorldY(t.clientY) })
-    },
-    { passive: true },
-  )
+  canvas.addEventListener('pointerup', (e) => {
+    dragging = false
+    try {
+      canvas.releasePointerCapture(e.pointerId)
+    } catch {
+      // ignore
+    }
+  })
+
+  canvas.addEventListener('pointercancel', () => {
+    dragging = false
+  })
 
   // Keyboard controls.
   const down = new Set()
@@ -161,11 +188,19 @@
     ctx.arc(g.ballX, g.ballY, 8, 0, Math.PI * 2)
     ctx.fill()
 
-    // score + status
+    // score + timer
     ctx.fillStyle = 'rgba(255,255,255,0.9)'
     ctx.font = '28px ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace'
     ctx.textAlign = 'center'
     ctx.fillText(`${g.score[0]}   ${g.score[1]}`, canvas.width / 2, 40)
+
+    if (typeof g.secondsLeft === 'number') {
+      const m = Math.floor(g.secondsLeft / 60)
+      const s = `${g.secondsLeft % 60}`.padStart(2, '0')
+      ctx.font = '14px ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace'
+      ctx.fillStyle = 'rgba(255,255,255,0.6)'
+      ctx.fillText(`${m}:${s}`, canvas.width / 2, 62)
+    }
 
     if (!g.running) {
       ctx.fillStyle = 'rgba(255,255,255,0.7)'

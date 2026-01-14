@@ -11,11 +11,17 @@ import (
 	"github.com/gorilla/websocket"
 )
 
+var allowedOrigins = map[string]struct{}{
+	"http://localhost:8080": {},
+}
+
 var wsUpgrader = websocket.Upgrader{
 	ReadBufferSize:  1024,
 	WriteBufferSize: 1024,
 	CheckOrigin: func(r *http.Request) bool {
-		return true
+		origin := r.Header.Get("Origin")
+		_, ok := allowedOrigins[origin]
+		return ok
 	},
 }
 
@@ -38,6 +44,7 @@ func handleWS(w http.ResponseWriter, r *http.Request) {
 	}
 	c.mouseY.Store(-1)
 
+	// Default behavior: join matchmaking queue. Client may later send "join".
 	globalHub.assignToRoom(c)
 
 	// Welcome message.
@@ -77,6 +84,30 @@ func readPump(c *client) {
 		}
 
 		switch msg.Type {
+		case "join":
+			var j wsInJoin
+			if err := json.Unmarshal(msg.Data, &j); err != nil {
+				continue
+			}
+			c.name = j.Name
+			// Only spectators can join by room id.
+			if c.side != -1 {
+				continue
+			}
+			if !globalHub.joinByRoomID(c, j.RoomID) {
+				payload, _ := json.Marshal(wsOut{Type: "error", Data: "room not found"})
+				select {
+				case c.send <- payload:
+				default:
+				}
+				continue
+			}
+			hello := wsOut{Type: "hello", Data: wsOutHello{ClientID: c.id, RoomID: roomID(c), Side: c.side, W: worldW, H: worldH}}
+			payload, _ := json.Marshal(hello)
+			select {
+			case c.send <- payload:
+			default:
+			}
 		case "move":
 			var m wsInMove
 			if err := json.Unmarshal(msg.Data, &m); err != nil {
@@ -97,6 +128,12 @@ func readPump(c *client) {
 			}
 			c.mouseY.Store(int32(m.Y))
 			c.moveDir.Store(0)
+		case "name":
+			var j wsInJoin
+			if err := json.Unmarshal(msg.Data, &j); err != nil {
+				continue
+			}
+			c.name = j.Name
 		}
 	}
 }
@@ -166,6 +203,8 @@ func runLoop(h *hub) {
 			r.step(dt)
 			state := r.snapshot()
 			payload, _ := json.Marshal(wsOut{Type: "state", Data: state})
+
+			// Broadcast to players.
 			for side := 0; side < 2; side++ {
 				p := r.players[side]
 				if p == nil {
@@ -175,6 +214,23 @@ func runLoop(h *hub) {
 				case p.send <- payload:
 				default:
 					// Drop if slow; connection will timeout eventually.
+				}
+			}
+
+			// Broadcast to spectators.
+			r.mu.Lock()
+			specs := make([]*client, 0, len(r.spectators))
+			for _, s := range r.spectators {
+				specs = append(specs, s)
+			}
+			r.mu.Unlock()
+			for _, s := range specs {
+				if s == nil {
+					continue
+				}
+				select {
+				case s.send <- payload:
+				default:
 				}
 			}
 		}

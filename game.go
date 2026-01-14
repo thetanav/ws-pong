@@ -26,6 +26,7 @@ const (
 
 type client struct {
 	id   string
+	name string
 	conn *websocket.Conn
 	send chan []byte
 
@@ -41,7 +42,8 @@ type room struct {
 	id string
 	mu sync.Mutex
 
-	players [2]*client
+	players    [2]*client
+	spectators map[string]*client
 
 	paddleY [2]float64
 	score   [2]int
@@ -51,7 +53,9 @@ type room struct {
 	ballVX float64
 	ballVY float64
 
-	lastTick time.Time
+	startTime time.Time
+	endTime   time.Time
+	lastTick  time.Time
 }
 
 type hub struct {
@@ -64,6 +68,11 @@ type hub struct {
 type wsIn struct {
 	Type string          `json:"type"`
 	Data json.RawMessage `json:"data,omitempty"`
+}
+
+type wsInJoin struct {
+	RoomID string `json:"roomId"`
+	Name   string `json:"name"`
 }
 
 type wsInMove struct {
@@ -93,10 +102,32 @@ type wsOutState struct {
 	BallY   float64    `json:"ballY"`
 	Score   [2]int     `json:"score"`
 	Running bool       `json:"running"`
+
+	SecondsLeft int      `json:"secondsLeft"`
+	Spectators  []string `json:"spectators"`
 }
 
 func newHub() *hub {
 	return &hub{rooms: make(map[string]*room)}
+}
+
+func (h *hub) joinByRoomID(c *client, roomID string) bool {
+	h.mu.Lock()
+	r := h.rooms[roomID]
+	h.mu.Unlock()
+	if r == nil {
+		return false
+	}
+
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.spectators == nil {
+		r.spectators = make(map[string]*client)
+	}
+	c.room = r
+	c.side = -1
+	r.spectators[c.id] = c
+	return true
 }
 
 func (h *hub) assignToRoom(c *client) {
@@ -127,41 +158,44 @@ func (h *hub) assignToRoom(c *client) {
 
 func (h *hub) removeClient(c *client) {
 	h.mu.Lock()
-	defer h.mu.Unlock()
-
 	// Remove from waiting queue.
 	for i := range h.waitQ {
 		if h.waitQ[i] == c {
 			h.waitQ = append(h.waitQ[:i], h.waitQ[i+1:]...)
+			h.mu.Unlock()
 			return
 		}
 	}
-
 	if c.room == nil {
+		h.mu.Unlock()
 		return
 	}
-
 	r := c.room
+	h.mu.Unlock()
 
-	// Remove from room players.
 	r.mu.Lock()
 	for side := 0; side < 2; side++ {
 		if r.players[side] == c {
 			r.players[side] = nil
 		}
 	}
-	running := r.players[0] != nil && r.players[1] != nil
+	delete(r.spectators, c.id)
+	empty := r.players[0] == nil && r.players[1] == nil && len(r.spectators) == 0
 	r.mu.Unlock()
 
-	if !running {
-		// Tear down room if a player left.
+	if empty {
+		h.mu.Lock()
 		delete(h.rooms, r.id)
+		h.mu.Unlock()
 	}
 }
 
+const matchDuration = 5 * time.Minute
+
 func newRoom(n int) *room {
 	r := &room{
-		id: "room-" + itoa(n),
+		id:         "room-" + itoa(n),
+		spectators: make(map[string]*client),
 	}
 	r.resetRoundLocked()
 	return r
@@ -181,7 +215,13 @@ func (r *room) resetRoundLocked() {
 	}
 	r.ballVX = dir * ballBaseSpeed
 	r.ballVY = math.Tan(angle) * ballBaseSpeed
-	r.lastTick = time.Now()
+
+	now := time.Now()
+	r.lastTick = now
+	if r.startTime.IsZero() {
+		r.startTime = now
+		r.endTime = now.Add(matchDuration)
+	}
 }
 
 func (r *room) step(dt float64) {
@@ -190,6 +230,9 @@ func (r *room) step(dt float64) {
 
 	running := r.players[0] != nil && r.players[1] != nil
 	if !running {
+		return
+	}
+	if !r.endTime.IsZero() && time.Now().After(r.endTime) {
 		return
 	}
 
@@ -273,12 +316,40 @@ func (r *room) bounceOffPaddle(side int) {
 func (r *room) snapshot() wsOutState {
 	r.mu.Lock()
 	defer r.mu.Unlock()
+
+	secondsLeft := 0
+	if !r.endTime.IsZero() {
+		secondsLeft = int(time.Until(r.endTime).Seconds())
+		if secondsLeft < 0 {
+			secondsLeft = 0
+		}
+	}
+
+	spectators := make([]string, 0, len(r.spectators))
+	for _, c := range r.spectators {
+		if c == nil {
+			continue
+		}
+		if c.name != "" {
+			spectators = append(spectators, c.name)
+		} else {
+			spectators = append(spectators, c.id)
+		}
+	}
+
+	running := r.players[0] != nil && r.players[1] != nil
+	if !r.endTime.IsZero() && time.Now().After(r.endTime) {
+		running = false
+	}
+
 	return wsOutState{
-		PaddleY: r.paddleY,
-		BallX:   r.ballX,
-		BallY:   r.ballY,
-		Score:   r.score,
-		Running: r.players[0] != nil && r.players[1] != nil,
+		PaddleY:     r.paddleY,
+		BallX:       r.ballX,
+		BallY:       r.ballY,
+		Score:       r.score,
+		Running:     running,
+		SecondsLeft: secondsLeft,
+		Spectators:  spectators,
 	}
 }
 
