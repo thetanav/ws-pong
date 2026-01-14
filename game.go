@@ -265,24 +265,24 @@ func (r *room) step(dt float64) {
 	}
 
 	// Paddle collisions.
-	leftX := float64(paddleMargin + paddleW)
-	rightX := float64(worldW - paddleMargin - paddleW)
+	leftFaceX := float64(paddleMargin + paddleW)
+	rightFaceX := float64(worldW - paddleMargin - paddleW)
+	leftPaddleX := float64(paddleMargin)
+	rightPaddleX := float64(worldW - paddleMargin - paddleW)
 
-	if r.ballVX < 0 && r.ballX-ballRadius <= leftX {
+	// Left paddle overlap.
+	if r.ballVX < 0 && r.ballX-ballRadius <= leftFaceX {
 		py := r.paddleY[0]
-		if r.ballY >= py && r.ballY <= py+paddleH {
-			r.ballX = leftX + ballRadius
-			// r.ballVY *= -0.98
-			// r.ballVX *= -1
+		if r.ballY >= py && r.ballY <= py+paddleH && r.ballX+ballRadius >= leftPaddleX {
+			r.ballX = leftFaceX + ballRadius
 			r.bounceOffPaddle(0)
 		}
 	}
-	if r.ballVX > 0 && r.ballX+ballRadius >= rightX {
+	// Right paddle overlap.
+	if r.ballVX > 0 && r.ballX+ballRadius >= rightFaceX {
 		py := r.paddleY[1]
-		if r.ballY >= py && r.ballY <= py+paddleH {
-			r.ballX = rightX - ballRadius
-			// r.ballVY *= -1.02
-			// r.ballVX *= -1
+		if r.ballY >= py && r.ballY <= py+paddleH && r.ballX-ballRadius <= rightPaddleX+paddleW {
+			r.ballX = rightFaceX - ballRadius
 			r.bounceOffPaddle(1)
 		}
 	}
@@ -309,7 +309,20 @@ func (r *room) bounceOffPaddle(side int) {
 
 	angle := rel * 0.9 // max ~50 degrees
 
-	r.ballVX *= -1
+	// Flip direction and apply spin while preserving speed.
+	dir := 1.0
+	if side == 0 {
+		dir = 1
+	} else {
+		dir = -1
+	}
+	if r.ballVX < 0 {
+		dir = 1
+	} else {
+		dir = -1
+	}
+	vx := math.Abs(speed * math.Cos(angle))
+	r.ballVX = dir * vx
 	r.ballVY = speed * math.Sin(angle)
 }
 

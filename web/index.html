@@ -50,6 +50,31 @@
         background: #050814;
         border: 1px solid rgba(255, 255, 255, 0.12);
         border-radius: 10px;
+        touch-action: none;
+      }
+
+      .pad {
+        display: none;
+        gap: 10px;
+        justify-content: center;
+        align-items: center;
+      }
+
+      .pad button {
+        width: 76px;
+        height: 76px;
+        border-radius: 16px;
+        border: 1px solid rgba(255, 255, 255, 0.22);
+        background: rgba(255, 255, 255, 0.06);
+        color: var(--fg);
+        font-size: 20px;
+        font-weight: 700;
+      }
+
+      @media (pointer: coarse) {
+        .pad {
+          display: flex;
+        }
       }
       .help {
         font-size: 13px;
@@ -78,10 +103,19 @@
 
       <canvas id="c" width="800" height="600"></canvas>
 
+      <div class="pad" aria-label="Mobile controls">
+        <button id="btnUp" type="button" aria-label="Move up">
+          UP
+        </button>
+        <button id="btnDown" type="button" aria-label="Move down">
+          DOWN
+        </button>
+      </div>
+
       <div class="help">
         Controls:
         <span id="keys"></span>
-        + drag on the canvas.
+        + drag on the canvas (desktop) or use buttons (mobile).
         <br />
         Spectate: open <code>/?room=room-1&name=YourName</code>
       </div>

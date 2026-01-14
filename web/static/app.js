@@ -12,6 +12,17 @@
       ballY: 300,
       score: [0, 0],
       running: false,
+      secondsLeft: 0,
+      spectators: [],
+    },
+
+    // For smoothing/interpolation.
+    lastServerState: null,
+    lastServerAt: 0,
+
+    render: {
+      ballX: 400,
+      ballY: 300,
     },
   }
 
@@ -81,11 +92,51 @@
         if (s === 1) keysEl.innerHTML = `<kbd>↑</kbd>/<kbd>↓</kbd>`
         if (s === -1) keysEl.textContent = '(spectator/waiting)'
         statusEl.textContent = `Room ${state.hello.roomId} — ${sideName(s)}`
+
+        // Reset smoothed ball for new room/game.
+        state.lastServerState = null
+        state.lastServerAt = 0
+        state.render.ballX = state.game.ballX
+        state.render.ballY = state.game.ballY
       }
 
-      if (msg.type === 'state') {
-        state.game = msg.data
+
+       if (msg.type === 'state') {
+         const prev = state.lastServerState
+         const prevGame = state.game
+         state.game = msg.data
+
+
+         // If the ball teleported (score/reset), snap instantly.
+         if (prev) {
+           const dx = msg.data.ballX - prev.ballX
+           const dy = msg.data.ballY - prev.ballY
+           if (dx * dx + dy * dy > 140 * 140) {
+             state.render.ballX = msg.data.ballX
+             state.render.ballY = msg.data.ballY
+           }
+         } else {
+           state.render.ballX = msg.data.ballX
+           state.render.ballY = msg.data.ballY
+         }
+
+         // Prevent any perceived paddle snap: if the server suddenly changes
+         // a paddle by a very large delta, keep the previous value.
+         if (prevGame) {
+           const maxJump = 160
+           for (let i = 0; i < 2; i++) {
+             const dy = msg.data.paddleY[i] - prevGame.paddleY[i]
+             if (dy * dy > maxJump * maxJump) {
+               state.game.paddleY[i] = prevGame.paddleY[i]
+             }
+           }
+         }
+
+
+        state.lastServerState = msg.data
+        state.lastServerAt = performance.now()
       }
+
 
       if (msg.type === 'error') {
         statusEl.textContent = `Error: ${msg.data}`
@@ -130,6 +181,37 @@
     dragging = false
   })
 
+  // On-screen buttons (mobile).
+  const btnUp = document.getElementById('btnUp')
+  const btnDown = document.getElementById('btnDown')
+
+  function bindHoldButton(btn, dir) {
+    if (!btn) return
+
+    let holding = false
+
+    function start(e) {
+      e.preventDefault()
+      holding = true
+      send('move', { dir })
+    }
+
+    function end(e) {
+      e.preventDefault()
+      if (!holding) return
+      holding = false
+      send('move', { dir: 0 })
+    }
+
+    btn.addEventListener('pointerdown', start)
+    btn.addEventListener('pointerup', end)
+    btn.addEventListener('pointercancel', end)
+    btn.addEventListener('pointerleave', end)
+  }
+
+  bindHoldButton(btnUp, -1)
+  bindHoldButton(btnDown, 1)
+
   // Keyboard controls.
   const down = new Set()
 
@@ -160,8 +242,25 @@
     updateKeyboardDir()
   })
 
-  function draw() {
+  function lerp(a, b, t) {
+    return a + (b - a) * t
+  }
+
+  function updateRenderState(now) {
+    const snap = state.lastServerState
+    if (!snap) return
+
+    // Smooth toward the latest server state over ~60ms (snappier).
+    const alpha = Math.max(0, Math.min(1, (now - state.lastServerAt) / 10))
+
+    // Only smooth the ball to reduce visual snaps under load.
+    state.render.ballX = lerp(state.render.ballX, snap.ballX, alpha)
+    state.render.ballY = lerp(state.render.ballY, snap.ballY, alpha)
+  }
+
+  function draw(now) {
     const g = state.game
+    updateRenderState(now)
 
     ctx.clearRect(0, 0, canvas.width, canvas.height)
 
@@ -185,7 +284,7 @@
 
     // ball
     ctx.beginPath()
-    ctx.arc(g.ballX, g.ballY, 8, 0, Math.PI * 2)
+    ctx.arc(state.render.ballX, state.render.ballY, 8, 0, Math.PI * 2)
     ctx.fill()
 
     // score + timer
@@ -208,9 +307,9 @@
       ctx.fillText('Waiting for both players…', canvas.width / 2, canvas.height / 2)
     }
 
-    requestAnimationFrame(draw)
+    requestAnimationFrame((t) => draw(t))
   }
 
   connect()
-  requestAnimationFrame(draw)
+  requestAnimationFrame((t) => draw(t))
 })()
