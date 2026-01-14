@@ -1,0 +1,90 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Multiplayer Pong</title>
+    <style>
+      :root {
+        --bg: #0b1020;
+        --fg: #e7ecff;
+        --muted: #aab3d1;
+        --accent: #7aa2ff;
+      }
+      html,
+      body {
+        height: 100%;
+        margin: 0;
+        background: var(--bg);
+        color: var(--fg);
+        font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, helvetica, arial;
+      }
+      .wrap {
+        max-width: 980px;
+        margin: 0 auto;
+        padding: 16px;
+        display: grid;
+        grid-template-columns: 1fr;
+        gap: 12px;
+      }
+      .top {
+        display: flex;
+        justify-content: space-between;
+        align-items: baseline;
+        gap: 12px;
+        flex-wrap: wrap;
+      }
+      .top h1 {
+        font-size: 16px;
+        margin: 0;
+        font-weight: 600;
+      }
+      .status {
+        font-size: 13px;
+        color: var(--muted);
+      }
+      canvas {
+        width: 100%;
+        max-width: 900px;
+        aspect-ratio: 4 / 3;
+        background: #050814;
+        border: 1px solid rgba(255, 255, 255, 0.12);
+        border-radius: 10px;
+      }
+      .help {
+        font-size: 13px;
+        color: var(--muted);
+        line-height: 1.5;
+      }
+      kbd {
+        border: 1px solid rgba(255, 255, 255, 0.2);
+        padding: 2px 6px;
+        border-radius: 6px;
+        background: rgba(255, 255, 255, 0.06);
+        font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+        font-size: 12px;
+      }
+      a {
+        color: var(--accent);
+      }
+    </style>
+  </head>
+  <body>
+    <div class="wrap">
+      <div class="top">
+        <h1>Multiplayer Pong</h1>
+        <div class="status" id="status">Connecting…</div>
+      </div>
+
+      <canvas id="c" width="800" height="600"></canvas>
+
+      <div class="help">
+        Controls:
+        <span id="keys"></span>
+        + mouse/touch move on the canvas.
+      </div>
+    </div>
+
+    <script src="/static/app.js"></script>
+  </body>
+</html>
